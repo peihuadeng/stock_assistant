@@ -12,7 +12,7 @@ class AsyncLLM(Agent):
     async def __call__(self, state: CommonState):
         prompt = self._build_prompt(state)
         response = await self.llm.ainvoke(prompt)
-        print(f"提交给大模型如下提示词：\n{prompt}\n大模型回答如下：\n{response}")
+        # print(f"提交给大模型如下提示词：\n{prompt}\n大模型回答如下：\n{response}")
         return {"messages": [response]}
 
 

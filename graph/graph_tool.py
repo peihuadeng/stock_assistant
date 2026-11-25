@@ -13,9 +13,12 @@ from langchain_core.tools import BaseTool
 from state.common_state import CommonState
 
 
-def create_agent(system_prompt: None | SystemMessage, tool_list: None | list[BaseTool]):
-    from llm.sync_llm import SyncLLM
-    llm = SyncLLM(model=os.getenv("MODEL_NAME"), temperature=0, system_prompt=system_prompt, tool_list=tool_list)
+def create_agent(system_prompt: None | SystemMessage, tool_list: None | list[BaseTool], is_async=True) -> StateGraph:
+    if is_async:
+        from llm.async_llm import AsyncLLM as LLM
+    else:
+        from llm.sync_llm import SyncLLM as LLM
+    llm = LLM(model=os.getenv("MODEL_NAME"), temperature=0, system_prompt=system_prompt, tool_list=tool_list)
     tool_executor = ToolNode(tool_list)
 
     graph = StateGraph(CommonState)
@@ -29,23 +32,25 @@ def create_agent(system_prompt: None | SystemMessage, tool_list: None | list[Bas
     return graph
 
 
-def init_app():
+def init_app(is_async=True):
     from tools import search
     tool_list = [search]
 
     from prompt_list import system_prompt
-    graph = create_agent(system_prompt=SystemMessage(content=system_prompt), tool_list=tool_list)
+    graph = create_agent(system_prompt=SystemMessage(content=system_prompt), tool_list=tool_list, is_async=is_async)
     memory = InMemorySaver()
     return graph.compile(checkpointer=memory)
 
 
 # 测试代码
 if __name__ == "__main__":
-    from langchain_core.messages import AIMessageChunk, ToolMessage
+    import asyncio
+    from langchain_core.messages import SystemMessage, AIMessageChunk, ToolMessage
     from langchain_core.prompts import HumanMessagePromptTemplate
     from prompt_list import human_prompt
 
-    app = init_app()
+    # 输出可视化图
+    app = init_app(False)
     os.makedirs("img", exist_ok=True)
     app.get_graph().draw_png(output_file_path="img/graph_tool.png")
 
@@ -53,10 +58,8 @@ if __name__ == "__main__":
     human_message = HumanMessagePromptTemplate.from_template(human_prompt).format(message=content)
 
     config = {"configurable": {"thread_id": "1"}}
-    # for event in app.stream_events({"messages": [human_message]}, config=config, version='v3'):
-    #     print("**")
-    #     print(event)
-    # 流式输出模式：stream_mode="messages"。实时输出模型文本
+
+    # 同步流式输出模式，messages：实时输出模型文本；updates：节点更新；custom：自定义流输出
     current_node = None
     for event in app.stream({"messages": [human_message]}, config=config,
                             stream_mode=["messages", "updates", "custom"], version='v2'):
@@ -93,3 +96,39 @@ if __name__ == "__main__":
                         print("AI回答：", msg.text)
         elif event_type == "custom":
             print(event_data, flush=True)
+
+    # 异步流式输出模式，基于事件模型
+    app = init_app(True)
+
+
+    async def async_main():
+        async for event in app.astream_events({"messages": [human_message]}, config=config, version='v2'):
+            kind = event["event"]
+            name = event["name"]
+            data = event["data"]
+            metadata = event["metadata"]
+            # print(kind, name, data, metadata)
+            # 大模型事件
+            if kind == "on_chat_model_start":
+                print("*" * 100, flush=True)
+                for message in data["input"]["messages"][0]:
+                    print(f"{message.__class__.__name__}：\n{message.content}", flush=True)
+                print(f"{metadata.get('langgraph_node')}>>>", flush=True)
+            if kind == "on_chat_model_stream" and data['chunk'].content:
+                print(f"{data['chunk'].content}", end="", flush=True)
+            if kind == "on_chat_model_end":
+                if data["output"].tool_calls:
+                    print("请求调用以下工具：")
+                    for tool in data["output"].tool_calls:
+                        print(f"工具：{tool['name']}，入参：{tool['args']}", flush=True)
+                print("", flush=True)
+            # 工具调用事件
+            elif kind == "on_tool_start":
+                print("*" * 100, flush=True)
+                print(f"{metadata.get('langgraph_node')}>>>", flush=True)
+                print(f"工具调用开始，工具名：{name}，入参：{data['input']}", flush=True)
+            elif kind == "on_tool_end":
+                print(f"工具调用结束，工具名：{name}，入参：{data['output'].content}", flush=True)
+
+
+    asyncio.run(async_main())
