@@ -11,7 +11,7 @@ class SyncLLM(Agent):
     def __call__(self, state: CommonState):
         prompt = self._build_prompt(state)
         response = self.llm.invoke(prompt)
-        print(f"提交给大模型如下提示词：\n{prompt}\n大模型回答如下：\n{response}")
+        # print(f"提交给大模型如下提示词：\n{prompt}\n大模型回答如下：\n{response}")
         return {"messages": [response]}
 
 
@@ -19,6 +19,7 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
 
     load_dotenv()
+    # 不带工具调用
     llm = SyncLLM(model=os.getenv("MODEL_NAME"), temperature=0, system_prompt=None, tool_list=None)
     state = CommonState(messages=[HumanMessage(content="你好")])
     result = llm(state)
@@ -32,3 +33,17 @@ if __name__ == "__main__":
     state = CommonState(messages=[HumanMessage(content="你好！帮我联网检索以下关键字：人工智能")])
     result = llm(state)
     print(result)
+
+
+    # 同步调用大模型，流式输出
+    class SyncLLMStream(Agent):
+        def __call__(self, state: CommonState):
+            prompt = self._build_prompt(state)
+            yield from self.llm.stream(prompt)
+
+
+    llm = SyncLLMStream(model=os.getenv("MODEL_NAME"), temperature=0, system_prompt=None, tool_list=None)
+    state = CommonState(messages=[HumanMessage(content="你好！帮我联网检索以下关键字：人工智能")])
+
+    for chunk in llm(state):
+        print(chunk.content, end="", flush=True)
