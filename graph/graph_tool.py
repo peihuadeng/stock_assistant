@@ -129,6 +129,9 @@ if __name__ == "__main__":
                 print(f"工具调用开始，工具名：{name}，入参：{data['input']}", flush=True)
             elif kind == "on_tool_end":
                 print(f"工具调用结束，工具名：{name}，入参：{data['output'].content}", flush=True)
+            # 自定义事件
+            if kind == "on_custom_event":
+                print(f"自定义事件：{data}", flush=True)
 
 
     asyncio.run(async_main())
